@@ -1,0 +1,162 @@
+#!/usr/bin/env python
+# encoding: utf-8
+
+import sys
+import os
+import time
+import numpy as np
+import pyaudio
+import pygame
+import random
+import time
+import math
+from pygame.locals import *
+Size = (800,600)
+X = Size[0]
+Y = Size[1]
+G = 9.8
+K = 15.0
+PX = 200
+MAXWIDTH = 5
+FORMAT = pyaudio.paInt16
+CHANNELS = 1
+RATE = 16000
+CHUNK = 512
+RANK = 1000
+TURN = 10
+Screen = pygame.display.set_mode(Size)
+Clock = pygame.time.Clock()
+unit = 20
+back = pygame.transform.scale(pygame.image.load("data/back.jpg"),Size)
+wall = pygame.transform.scale(pygame.image.load("data/wall.jpg"),(unit,unit))
+plane = pygame.transform.scale(pygame.image.load("data/plane.png"),(unit,unit))
+RED = (255,0,0)
+GREEN = (39,203,81)
+BLUE = (123,48,255)
+WHITE = (255,255,255)
+BLACK = (0,0,0)
+
+class Game():
+	highscore = 0
+	def __init__(self):
+		pygame.init()
+		self.todraw = []
+		self.pos1 = 0
+		self.pos2 = 0
+		self.x = 0
+		self.y = Y/2
+		self.a = 0
+		self.v = 0
+		self.freq = 10 * unit
+		self.nxt = 0
+		self.dbstr = ""
+		self.dbstr2 = ""
+		self.font = pygame.font.Font(None,35)
+		self.pa = pyaudio.PyAudio()
+		self.cnt = 0
+		self.data = []
+		self.recording = pyaudio.paContinue
+#音声解析部分
+	def evaluate(self,val):
+		p = float(val) / 1000 - 20
+		if p == 0:
+			return 0
+		else:
+			return - (p / abs(p)) * math.log(abs(p)**2,2) / 100;
+	def analyze(self,data):
+		rdata = []
+		for e in data:
+			rdata.append(abs(e))
+		rdata.sort()
+		return self.evaluate(rdata[len(rdata)-RANK])
+	def fft(self, samples):
+		win = np.hanning(len(samples))
+		#フーリエ解析
+		res = np.fft.fftshift(np.fft.fft(win*samples))
+		freq = np.fft.fftfreq(len(samples), d=self.RATE**-1)
+		return zip(freq, 20*np.log10(np.abs(res))) 
+	def callback(self, in_data, frame_count, time_info, status):
+		self.data.extend(np.frombuffer(''.join(in_data),dtype="int16"))
+		self.cnt = (self.cnt + 1) % TURN
+		if self.cnt % TURN == TURN - 1:
+			#self.v = self.analyze(self.data);
+			self.a = self.analyze(self.data) / 5;
+			self.data = []
+		return (in_data, self.recording)
+	def debug(self,string):
+		self.dbstr = string
+	def update(self):
+		if not self.check():
+			self.__init__()
+		self.make_wall()
+		while self.pos1 < len(self.todraw) and self.todraw[self.pos1][0] + unit < self.x:
+			self.pos1+=1
+		while self.pos2 < len(self.todraw) and self.todraw[self.pos2][0] + unit < self.x + PX:
+			self.pos2+=1
+		self.draw()
+		self.x+=1
+		self.v+=self.a
+		self.y+=self.v
+		self.debug(str(self.a))
+		if self.highscore < self.x:
+			self.highscore = self.x;
+		pressed_keys = pygame.key.get_pressed()
+		for event in pygame.event.get():
+			if event.type == QUIT:
+				exit()
+	def make_wall(self):
+		if self.x == self.nxt:
+#			if random.randint(0,4)<=3:
+			a=random.randint(0,Y/unit-MAXWIDTH)
+			b=random.randint(MAXWIDTH,Y/unit-a)
+			self.todraw.append((self.x+X,0,a*unit))
+			self.todraw.append((self.x+X,(a+b)*unit,Y))
+			self.nxt += self.freq
+	def check(self):
+		if self.y < -unit or self.y > Y:
+			self.__init__()
+		for p in range(self.pos2,len(self.todraw)-1):
+			if self.todraw[p][0] > self.x+PX+unit:
+				break
+			if self.todraw[p][1] - unit < self.y and self.y < self.todraw[p][2]:
+				return False
+		return True
+	def draw(self):
+		Screen.blit(back,(0,0))
+		Screen.blit(plane,(PX,self.y))
+		Screen.blit(self.font.render(self.dbstr,True,BLACK),(0,0))
+		Screen.blit(self.font.render(str(self.x),True,BLACK),(0,30))
+		Screen.blit(self.font.render(str(self.highscore),True,BLACK),(0,60))
+		for d in self.todraw[self.pos1:]:
+			x = d[0]
+			a = d[1]
+			b = d[2]
+			for i in range(a,b,unit):
+				Screen.blit(wall,(x-self.x,i))
+		pygame.display.update()
+
+def main():
+	try:
+		game = Game()
+		game.stream = game.pa.open(
+			format = FORMAT,
+			channels = CHANNELS,
+			rate = RATE,
+			input = True,
+			output = False,
+			frames_per_buffer = CHUNK,
+			stream_callback = game.callback)
+		game.stream.start_stream()
+		f = open("data/score.txt","r")
+		game.highscore = eval(f.readline())
+		f.close()
+		while True:
+			Clock.tick(60)
+			game.update()
+	finally:
+		f = open("data/score.txt","w")
+		f.write(str(game.highscore))
+		f.close()
+
+if __name__ == '__main__': main()
+
