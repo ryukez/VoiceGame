@@ -14,26 +14,22 @@ from pygame.locals import *
 Size = (800,600)
 X = Size[0]
 Y = Size[1]
+G = 9.8
 K = 15.0
 PX = 200
-Range = 100
 MAXWIDTH = 5
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
-RATE = 8192
-CHUNK = 2048
-SHIFT = 512
-RANK = 5
-TURN = 5
+RATE = 16000
+CHUNK = 512
+RANK = 1000
+TURN = 10
 Screen = pygame.display.set_mode(Size)
 Clock = pygame.time.Clock()
-Scale = 2
-EPS = 5
 unit = 20
 back = pygame.transform.scale(pygame.image.load("data/back.jpg"),Size)
 wall = pygame.transform.scale(pygame.image.load("data/wall.jpg"),(unit,unit))
 plane = pygame.transform.scale(pygame.image.load("data/plane.png"),(unit,unit))
-menu = pygame.transform.scale(pygame.image.load("data/gameover.jpg"),Size)
 RED = (255,0,0)
 GREEN = (39,203,81)
 BLUE = (123,48,255)
@@ -42,7 +38,6 @@ BLACK = (0,0,0)
 
 class Game():
 	highscore = 0
-	noise = []
 	def __init__(self):
 		pygame.init()
 		self.todraw = []
@@ -54,23 +49,15 @@ class Game():
 		self.v = 0
 		self.freq = 10 * unit
 		self.nxt = 0
-		self.ypre = Y/2
-		self.ynxt = Y/2
 		self.dbstr = ""
 		self.dbstr2 = ""
-		self.start = 0
 		self.font = pygame.font.Font(None,35)
 		self.pa = pyaudio.PyAudio()
+		self.cnt = 0
 		self.data = []
 		self.recording = pyaudio.paContinue
 		self.scene = 1
-		self.cnt = 0
-		self.freqList = []
 #音声解析部分
-	def limit(self,x,a,b):
-		if x<a: return a
-		elif x<=b: return x
-		else: return b
 	def evaluate(self,val):
 		p = float(val) / 1000 - 20
 		if p == 0:
@@ -82,80 +69,47 @@ class Game():
 		for e in data:
 			rdata.append(abs(e))
 		rdata.sort()
-		return self.evaluate(rdata[len(rdata)-len(rdata)/RANK])
-	def s_analyze(self,data):
-		rdata = []
-		for e in data:
-			rdata.append(abs(e))
-		rdata.sort()
-		return rdata[len(rdata)-RANK]
-	def h_analyze(self,data):
-		pos = 0
-		for i in range(0,len(data)):
-			if data[i] > data[pos]:
-				pos = i
-			if self.freqList[i] > 3000:
-				break
-		return pos
-	def fft(self, data):
-#		for i in range(0,len(data)):
-#			data[i]-=self.noise[i]
-		data = [c/32768.0 for c in data]
-		window = np.hamming(len(data))
-		self.freqList = np.fft.fftfreq(len(data),d=1.0/RATE)
-		result=np.fft.fft(window*data)
-		unit=RATE/len(data)
-		result=[np.sqrt(c.real**2 + c.imag**2) for c in result]
-		h = self.h_analyze(result)
-		return self.freqList[h]
-#		print self.h_analyze(result) / self.s_analyze(data)
+		return self.evaluate(rdata[len(rdata)-RANK])
+	def fft(self, samples):
+		win = np.hanning(len(samples))
+		#フーリエ解析
+		res = np.fft.fftshift(np.fft.fft(win*samples))
+		freq = np.fft.fftfreq(len(samples), d=self.RATE**-1)
+		return zip(freq, 20*np.log10(np.abs(res))) 
 	def callback(self, in_data, frame_count, time_info, status):
-		next = np.frombuffer(''.join(in_data),dtype="int16")
-		if self.start+CHUNK >= len(self.data):
-			self.data.extend(next)
+		self.data.extend(np.frombuffer(''.join(in_data),dtype="int16"))
+		self.cnt = (self.cnt + 1) % TURN
+		if self.cnt % TURN == TURN - 1:
+			#self.v = self.analyze(self.data);
+			self.a = self.analyze(self.data) / 5;
+			self.data = []
 		return (in_data, self.recording)
 	def debug(self,string):
 		self.dbstr = string
-	def gameover(self):
-		print "here"
-		if self.cnt <= 60:
-			self.cnt+=1
-		else:
-			self.__init__()
+	def drawGameOverMenu():
+		
 	def update(self):
 		if self.scene == 1:
 			if not self.check():
-				self.cnt = 0
 				self.scene = 2
 			self.make_wall()
 			while self.pos1 < len(self.todraw) and self.todraw[self.pos1][0] + unit < self.x:
 				self.pos1+=1
 			while self.pos2 < len(self.todraw) and self.todraw[self.pos2][0] + unit < self.x + PX:
 				self.pos2+=1
-			while len(self.data) - self.start >= CHUNK:
-#				print self.fft(self.data[self.start:self.start+CHUNK])
-				if len(self.data) - (self.start+SHIFT) >= CHUNK:
-					self.start+=SHIFT
-				else:
-					break
-			if len(self.data) > 0:
-				self.a = self.analyze(self.data[self.start:]) / 5
-		#		self.ynxt = float(self.s_analyze(self.data[self.start-SHIFT:])-(1<<14)) / (1<<15) * Y * Scale
-		#		self.ynxt = self.limit(self.ynxt,self.ypre - Range,self.ypre + Range)
-		#		self.debug(str(self.ynxt))
+			self.draw()
 			self.x+=1
 			self.v+=self.a
 			self.y+=self.v
 			self.debug(str(self.a))
 			if self.highscore < self.x:
-				self.highscore = self.x
+				self.highscore = self.x;
+			pressed_keys = pygame.key.get_pressed()
 		if self.scene == 2:
-			self.gameover()
-		self.draw()
-		pressed_keys = pygame.key.get_pressed()
+			self.drawGameOverMenu();
 		for event in pygame.event.get():
 			if event.type == QUIT:
-				exit()	
+				exit()
 	def make_wall(self):
 		if self.x == self.nxt:
 #			if random.randint(0,4)<=3:
@@ -166,28 +120,25 @@ class Game():
 			self.nxt += self.freq
 	def check(self):
 		if self.y < -unit or self.y > Y:
-			return False
+			self.__init__()
 		for p in range(self.pos2,len(self.todraw)-1):
 			if self.todraw[p][0] > self.x+PX+unit:
 				break
-			if self.todraw[p][1] - unit + EPS < self.y and self.y < self.todraw[p][2] - EPS:
+			if self.todraw[p][1] - unit < self.y and self.y < self.todraw[p][2]:
 				return False
 		return True
 	def draw(self):
-		if self.scene == 1:
-			Screen.blit(back,(0,0))
-			Screen.blit(plane,(PX,self.y))
-			Screen.blit(self.font.render(self.dbstr,True,BLACK),(0,0))
-			Screen.blit(self.font.render(str(self.x),True,BLACK),(0,30))
-			Screen.blit(self.font.render(str(self.highscore),True,BLACK),(0,60))
-			for d in self.todraw[self.pos1:]:
-				x = d[0]
-				a = d[1]
-				b = d[2]
-				for i in range(a,b,unit):
-					Screen.blit(wall,(x-self.x,i))
-		if self.scene == 2 and self.cnt <= 60:
-			Screen.blit(menu,(0,-Y+Y/60*self.cnt))
+		Screen.blit(back,(0,0))
+		Screen.blit(plane,(PX,self.y))
+		Screen.blit(self.font.render(self.dbstr,True,BLACK),(0,0))
+		Screen.blit(self.font.render(str(self.x),True,BLACK),(0,30))
+		Screen.blit(self.font.render(str(self.highscore),True,BLACK),(0,60))
+		for d in self.todraw[self.pos1:]:
+			x = d[0]
+			a = d[1]
+			b = d[2]
+			for i in range(a,b,unit):
+				Screen.blit(wall,(x-self.x,i))
 		pygame.display.update()
 
 def main():
@@ -205,10 +156,6 @@ def main():
 		f = open("data/score.txt","r")
 		game.highscore = eval(f.readline())
 		f.close()
-		f = open("data/noise.txt","r")
-		for line in f.readlines():
-			game.noise.append(eval(line))
-		f.close()
 		while True:
 			Clock.tick(60)
 			game.update()
@@ -218,3 +165,4 @@ def main():
 		f.close()
 
 if __name__ == '__main__': main()
+
