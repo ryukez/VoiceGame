@@ -3,16 +3,18 @@ import os
 import time
 import numpy as np
 import pyaudio
+import struct
 import pygame
 import random
 import time
 import math
+import wave
 from pygame.locals import *
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
 RATE = 8000
-CHUNK = 512
-RANK = 500
+CHUNK = 8000
+RANK = 100
 TURN = 5
 
 class Record():
@@ -42,9 +44,10 @@ def main():
 	while True:
 		if record.cnt == TURN:
 			break
-	f = open("data/noise.txt","w")
-	for e in record.data:
-		f.write(str(e)+'\n')
+	buf = struct.pack("h" * len(record.data),*record.data)
+	f = wave.open("data/voice.wav","w")
+	f.setparams((1,2,RATE,len(buf),"NONE","not compressed"))
+	f.writeframes(buf)
 	f.close()
 
 if __name__ == '__main__': main()
