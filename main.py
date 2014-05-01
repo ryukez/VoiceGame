@@ -21,7 +21,7 @@ Y = Size[1]
 PX = 150
 MAXWIDTH = 5
 MAXJUMP = 1.8
-PreSize = 8
+PreSize = 4
 Screen = pygame.display.set_mode((Size[0],Size[1]+40))
 Clock = pygame.time.Clock()
 Scale = 2
@@ -43,11 +43,12 @@ Volume = 0.4
 tune = {"A": 0,"A#": 1,"B": 2,"C": 3,"C#": 4,"D": 5,"D#": 6,"E": 7,"F": 8,"F#": 9,"G": 10,"G#": 11}
 
 #画像読み込み
-title = pygame.transform.scale(pygame.image.load("data/white.jpg").convert(),(Size[0],Size[1]+40))
+select_img = pygame.transform.scale(pygame.image.load("data/plane.png").convert_alpha(),(unit*2,unit*2))
+title = pygame.transform.scale(pygame.image.load("data/title.png").convert(),(Size[0],Size[1]+40))
 back = pygame.transform.scale(pygame.image.load("data/white.jpg").convert(),Size)
 wall = pygame.transform.scale(pygame.image.load("data/wall.png").convert_alpha(),(unit,unit))
 plane = pygame.transform.scale(pygame.image.load("data/plane.png").convert_alpha(),(unit,unit))
-menu = pygame.transform.scale(pygame.image.load("data/gameover.png").convert_alpha(),Size)
+menu = pygame.transform.scale(pygame.image.load("data/gameover.png").convert_alpha(),(Size[0],Size[1]+40))
 supporter = pygame.transform.scale(pygame.image.load("data/supporter.png").convert_alpha(),Size)
 circle = pygame.transform.scale(pygame.image.load("data/point.png").convert_alpha(),(unit,unit))
 
@@ -72,12 +73,17 @@ class Game():
 		self.scene = 0
 		self.cnt = 0
 		self.select = 0
-		self.mode = 0
+		self.mode = 1
 		self.pitch = 0
+		self.sound = True
 		self.sfont = pygame.font.SysFont("Comic Sans MS",50)
-		self.font = pygame.font.Font("data/MSGOTHIC.TTF",35)
-		self.midfont = pygame.font.Font("data/MSGOTHIC.TTF",60)
-		self.bigfont = pygame.font.Font("data/MSGOTHIC.TTF",100)
+#		self.font = pygame.font.Font("data/MSGOTHIC.TTF",35)
+#		self.midfont = pygame.font.Font("data/MSGOTHIC.TTF",60)
+#		self.bigfont = pygame.font.Font("data/MSGOTHIC.TTF",100)
+		self.font = pygame.font.SysFont("Comic Sans MS",35)
+		self.midfont = pygame.font.SysFont("Comic Sans MS",60)
+		self.bigfont = pygame.font.SysFont("Comic Sans MS",100)
+		self.jfont = pygame.font.Font("data/MSGOTHIC.TTF",35)
 #		self.read_note("data/note.txt")
 
 	#-----音声関連-----
@@ -92,21 +98,42 @@ class Game():
 		self.lyric = []
 		self.pos1 = 0
 		self.pos2 = 0
-		self.pos3 = 0
-		self.freq = 5 * unit
+		self.pos3 = 0	
+		if self.mode == 0:
+			self.freq = 3*unit
+			self.head = 0
+			self.dx = 1
+		if self.mode == 1:
+			self.freq = 42
+			self.head = 720
+			self.dx = 2
+		if self.mode == 2:
+			self.freq = 15*unit
+			self.head = 0
+			self.dx = 2
+		self.bfrconf = 0
+		self.confcount = 0
 		self.x = 0
 		self.y = Y/2
 		self.a = 0
 		self.v = 0
 		self.nxt = 0
+		self.change = 1
+		self.maxdif = 3
+		self.preh = 15
 		self.ypre = Y/2
 		self.ynxt = Y/2
 		self.preHz = [0] * PreSize
 		self.precount = 0
 		self.presum = 0
+		self.out_sound = pygame.mixer.Sound("data/mario2.wav")
 		if self.mode == 0:
 			self.read_note("data/note.txt")
-
+		if self.mode == 1:
+			self.read_note("data/note4.txt")
+			if self.sound:
+				pygame.mixer.music.load("data/hurusato.wav")
+				pygame.mixer.music.play()
 #デバッグ用
 	def debug(self,string):
 		self.dbstr = string
@@ -185,12 +212,26 @@ class Game():
 	#-------ゲーム画面--------
 		if self.scene == 1:
 		#当たり判定
-			if not self.check():
-				self.cnt = 0
-				self.scene = 2
-
+			ch = self.check()
+			if ch:
+				if self.mode == 2:
+					self.cnt = 0
+					self.scene = 2
+					if self.sound:
+						self.out_sound.play()
+					pygame.mixer.music.stop()
+				else:
+					if self.y < -unit or self.y > Y:
+						self.cnt = 0
+						self.scene = 2
+						if self.sound:
+							self.out_sound.play()
+						pygame.mixer.music.stop()						
+					elif self.bfrconf < ch:
+						self.bfrconf = ch
+						self.confcount+=1					
 		#壁作成部分
-			if self.mode == 1:
+			if self.mode == 2:
 				self.make_wall()
 			while self.pos1 < len(self.todraw) and self.todraw[self.pos1][0] + unit / 2 < self.x:
 				self.pos1+=1
@@ -198,7 +239,9 @@ class Game():
 				self.pos2+=1
 			while self.pos3 < len(self.point) and self.point[self.pos3][0] + unit / 2 < self.x:
 				self.pos3+=1
-
+			if self.pos3 == len(self.point):
+				self.cnt = 0
+				self.scene = 3
 		#音声入力 & 座標計算
 			s = 0.0
 			n = 0
@@ -207,16 +250,16 @@ class Game():
 				s+=f
 				n+=1
 				self.start+=SHIFT
-			if n > 0:
+			if self.x >= self.head and n > 0:
 				ave = s / n
 				if ave == 0 or ave > 1000:
 					self.a = 0
 				else:
-					if ave < 55.0:
-						ave = 55.0
+					if ave < 55.0 * (self.pitch+1):
+						ave = 55.0 * (self.pitch+1)
 					print ave
 					if self.x < 100 or (float(self.presum) / (PreSize * MAXJUMP) < ave and ave < float(self.presum) * MAXJUMP / PreSize) :
-						self.ynxt = Y - math.log(ave/110,2)*Y/2 - 12.5
+						self.ynxt = Y - math.log(ave/(110*(self.pitch+1)),2)*Y/2 - 12.5
 						if self.ynxt < 0:
 							self.ynxt = -100.0
 						if self.ynxt > Y:
@@ -230,7 +273,7 @@ class Game():
 					self.preHz[self.precount] = ave
 					self.precount = (self.precount + 1) % PreSize
 #			self.a=0
-			self.x+=2
+			self.x+=self.dx
 			self.v+=self.a
 			self.y+=self.v
 #			self.debug(u"あ")
@@ -240,10 +283,9 @@ class Game():
 				self.highscore = self.x / 120.0
 
 	#-------ゲームオーバー画面--------
-		if self.scene == 2:
+		if self.scene == 2 or self.scene == 3:
 			self.gameover()
 		self.draw()
-
 	#キーボード入力その他
 		pressed_keys = pygame.key.get_pressed()
 		for event in pygame.event.get():
@@ -251,9 +293,9 @@ class Game():
 				exit()
 			if self.scene == 0:
 				if event.type == KEYDOWN and event.key == K_UP:
-					self.select = (self.select + 2) % 3
+					self.select = (self.select + 3) % 4
 				if event.type == KEYDOWN and event.key == K_DOWN:
-					self.select = (self.select + 1) % 3
+					self.select = (self.select + 1) % 4
 				if self.select == 0:
 					if event.type == KEYDOWN and event.key == K_RETURN:
 						self.scene = 1
@@ -261,15 +303,19 @@ class Game():
 						self.play_init()
 				if self.select == 1:
 					if event.type == KEYDOWN and event.key == K_LEFT :
-						self.mode = (self.mode + 1) % 2
+						self.mode = (self.mode + 2) % 2 + 1
 					if event.type == KEYDOWN and event.key == K_RIGHT:
-						self.mode = (self.mode + 1) % 2
+						self.mode = (self.mode + 2) % 2 + 1
 				if self.select == 2:
 					if event.type == KEYDOWN and event.key == K_LEFT:
 						self.pitch = (self.pitch + 1) % 2
 					if event.type == KEYDOWN and event.key == K_RIGHT:
 						self.pitch = (self.pitch + 1) % 2
-			if self.scene == 2 and self.cnt > 60:
+				if self.select == 3:
+					if event.type == KEYDOWN and (event.key == K_LEFT or event.key == K_RIGHT):
+						self.sound = not self.sound
+						
+			if (self.scene == 2 or self.scene == 3) and self.cnt > 60:
 				if event.type == KEYDOWN and event.key == K_RIGHT:
 					self.select = (self.select + 1) % 2
 				if event.type == KEYDOWN and event.key == K_LEFT:
@@ -287,54 +333,77 @@ class Game():
 		f = open(filename,"r")
 		for line in f.readlines():
 			data = line.split(" ")
+			if data[1][0] == 'N':
+				self.nxt += self.freq*int(data[0])
+				continue
 			t = tune[data[1]] + int(data[2]) * 12
 			if t >= 12 and t <= 36:
 				center = int(((t-12)/24.0*Y+12.5)/unit)
 				self.lyric.append(unicode(data[3][:len(data[3])-1],"UTF-8"))
-				self.point.append((self.nxt+X,Y-((t-12)/24.0*Y+12.5)))
-				self.todraw.append((self.nxt+X,Y-(center-3)*unit,Y))
-				self.todraw.append((self.nxt+X,0,Y-(center+4)*unit))
+				self.point.append((self.head+self.nxt+X,Y-((t-12)/24.0*Y+12.5)))
+				self.todraw.append((self.head+self.nxt+X,Y-(center-4)*unit,Y))
+				self.todraw.append((self.head+self.nxt+X,0,Y-(center+5)*unit))
 			self.nxt += self.freq*int(data[0])
 			
 	def make_wall(self):
-		if self.x == self.nxt and not Debug :
-			a=random.randint(0,Y/unit-MAXWIDTH)
+		if self.x >= self.nxt and not Debug :
+			a=random.randint(max(0,self.preh-self.maxdif-3),min(self.preh+self.maxdif-3,Y/unit-MAXWIDTH))
 #			b=random.randint(MAXWIDTH,Y/unit-a)
 			self.point.append((self.x+X,(a+7/2.0)*unit))
 			self.todraw.append((self.x+X,0,a*unit))
 			self.todraw.append((self.x+X,(a+7)*unit,Y))
 			self.nxt += self.freq
+			self.preh = a+3
+		if self.x >= self.change * 600:
+			if self.change % 3 == 0 and self.maxdif < 12:
+				self.maxdif+=1
+			if self.change % 3 == 1 and self.freq > 5 * unit:
+				self.freq-=unit
+			self.change+=1
+			if self.change % 3 == 2 and self.dx < 4:
+				self.dx+=0.2
+			
 
 #当たり判定関数
 	def check(self):
 		if self.y < -unit or self.y > Y:
-			return False
+			return 1
 		for p in range(self.pos2,len(self.todraw)-1):
 			if self.todraw[p][0] + unit / 2 > self.x+PX+unit:
 				break
 			if self.todraw[p][1] - unit + EPS < self.y and self.y < self.todraw[p][2] - EPS:
-				return False
-		return True
+				return self.todraw[p][0]
+		return 0
 
 #描画系関数
 	def draw(self):
 	#-------タイトル画面--------
 		if self.scene == 0:
 			Screen.blit(title,(0,0))
-			Screen.blit(self.sfont.render("Play",True,BLACK),(300,270))
 			if self.mode == 0:
-				Screen.blit(self.sfont.render("Song",True,BLACK),(300,350))
+				Screen.blit(self.sfont.render("Song",True,BLACK),(380,390))
+				Screen.blit(self.jfont.render(u"(君が代)",True,BLACK),(500,420))
 			if self.mode == 1:
-				Screen.blit(self.sfont.render("Random",True,BLACK),(300,350))
+				Screen.blit(self.sfont.render("Song",True,BLACK),(380,390))
+				Screen.blit(self.jfont.render(u"(ふるさと)",True,BLACK),(500,420))
+			if self.mode == 2:
+				Screen.blit(self.sfont.render("Random",True,BLACK),(380,390))
 			if self.pitch == 0:
-				Screen.blit(self.sfont.render(u"±0",True,BLACK),(300,430))
+				Screen.blit(self.sfont.render(u"±0",True,BLACK),(380,480))
 			if self.pitch == 1:
-				Screen.blit(self.sfont.render("+1",True,BLACK),(300,430))
-			Screen.blit(plane,(200,300+self.select*80))
+				Screen.blit(self.sfont.render("+1",True,BLACK),(380,480))
+			if self.sound:
+				Screen.blit(self.sfont.render("On",True,BLACK),(400,555))
+			else:
+				Screen.blit(self.sfont.render("Off",True,BLACK),(400,555))
+			Screen.blit(select_img,(180,315+self.select*85))
 	#-------ゲーム画面--------
-		if self.scene == 1 or self.scene == 2:
+		if self.scene == 1 or self.scene == 2 or self.scene == 3:
 			Screen.blit(back,(0,0))
-			Screen.blit(self.font.render(self.dbstr,True,BLACK),(0,0))
+#			Screen.blit(self.font.render(self.dbstr,True,BLACK),(0,0))
+			if self.mode == 2:
+				Screen.blit(self.sfont.render("LEVEL: ",True,BLACK),(0,0))
+				Screen.blit(self.sfont.render(str(self.change),True,BLACK),(180,0))
 #			Screen.blit(self.font.render(str(self.x),True,BLACK),(0,30))
 #			Screen.blit(self.font.render(str(self.highscore),True,BLACK),(0,60))
 			pygame.draw.rect(Screen, (0,0,0), Rect(0,600,800,640))
@@ -346,8 +415,8 @@ class Game():
 				if self.point[i][0] > self.x + X:
 					break		
 				Screen.blit(circle,(self.point[i][0]-self.x,self.point[i][1]-unit/2))
-				if self.mode == 0:
-					Screen.blit(self.font.render(self.lyric[i],True,WHITE),(self.point[i][0]-self.x-5,600))
+				if not self.mode == 2:
+					Screen.blit(self.jfont.render(self.lyric[i],True,WHITE),(self.point[i][0]-self.x-5,600))
 			for d in self.todraw[self.pos1:]:
 				x = d[0]
 				a = d[1]
@@ -362,10 +431,21 @@ class Game():
 			else:
 				Screen.blit(menu,(0,0))
 				Screen.blit(self.bigfont.render(str(round(self.x/120.0,2))+"s",True,WHITE),(self.pos(self.bigfont.size(str(round(self.x/120.0,2))+"s")),100))
-				Screen.blit(self.midfont.render("Continue?",True,WHITE),(self.pos(self.midfont.size("Continue?")),300))
+				Screen.blit(self.midfont.render("Retry?",True,WHITE),(self.pos(self.midfont.size("Retry?")),300))
 				Screen.blit(self.midfont.render(">",True,WHITE),(150+self.select*300,400))
 				Screen.blit(self.midfont.render("YES",True,WHITE),(200,400))
 				Screen.blit(self.midfont.render("NO",True,WHITE),(500,400))
+		if self.scene == 3:
+			if self.cnt <= 60:
+				Screen.blit(menu,(0,-Y+Y/60*self.cnt))
+			else:
+				Screen.blit(menu,(0,0))
+				Screen.blit(self.bigfont.render("Clear in ",True,WHITE),(100,100))
+				Screen.blit(self.bigfont.render(str(self.confcount),True,WHITE),(500,100))
+				Screen.blit(self.midfont.render("Retry?",True,WHITE),(self.pos(self.midfont.size("Retry?")),300))
+				Screen.blit(self.midfont.render(">",True,WHITE),(150+self.select*300,400))
+				Screen.blit(self.midfont.render("YES",True,WHITE),(200,400))
+				Screen.blit(self.midfont.render("NO",True,WHITE),(500,400))		
 		pygame.display.update()
 	def pos(self,size):
 		return (X - size[0]) / 2
